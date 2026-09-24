@@ -5,6 +5,64 @@ import { PAL, FACES, newCube, move, grid, isSolved, scramble, inv, trainModel, s
 const LEVELS = { easy: { n: 3, coins: 5 }, medium: { n: 8, coins: 15 }, hard: { n: 20, coins: 40 }, expert: { n: 30, coins: 80 } };
 const POS = [[0, 1], [1, 2], [1, 1], [2, 1], [1, 0], [1, 3]]; // U R F D L B in the unfolded net
 const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+const FACE_SPEC = [
+  { key: "1,0,0", transform: "rotateY(90deg) translateZ(18px)" },
+  { key: "-1,0,0", transform: "rotateY(-90deg) translateZ(18px)" },
+  { key: "0,1,0", transform: "rotateX(90deg) translateZ(18px)" },
+  { key: "0,-1,0", transform: "rotateX(-90deg) translateZ(18px)" },
+  { key: "0,0,1", transform: "translateZ(18px)" },
+  { key: "0,0,-1", transform: "rotateY(180deg) translateZ(18px)" },
+];
+
+function Rubik3D({ cube }) {
+  const cubies = [];
+  for (let x = -1; x <= 1; x++) {
+    for (let y = -1; y <= 1; y++) {
+      for (let z = -1; z <= 1; z++) {
+        const stickers = new Map();
+        for (const s of cube) {
+          if (s.p[0] === x && s.p[1] === y && s.p[2] === z) stickers.set(s.n.join(","), PAL[s.c]);
+        }
+        if (stickers.size) {
+          cubies.push({
+            key: `${x},${y},${z}`,
+            x,
+            y,
+            z,
+            faces: FACE_SPEC.map((face) => ({
+              ...face,
+              color: stickers.get(face.key) ?? "rgba(17, 23, 38, 0.18)",
+            })),
+          });
+        }
+      }
+    }
+  }
+
+  return (
+    <div className="rubik3d" aria-label="3D Rubik cube">
+      <div className="rubik-scene">
+        <div className="rubik-cube">
+          {cubies.map((cubie) => (
+            <div
+              key={cubie.key}
+              className="rubik-cubie"
+              style={{ transform: `translate3d(${cubie.x * 36}px, ${cubie.y * 36}px, ${cubie.z * 36}px)` }}
+            >
+              {cubie.faces.map((face) => (
+                <span
+                  key={face.key}
+                  className="rubik-face"
+                  style={{ background: face.color, transform: face.transform }}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function Rubik({ upd }) {
   const [lvl, setLvl] = useState("easy"), [cube, setCube] = useState(newCube), [moves, setMoves] = useState(0);
@@ -66,6 +124,7 @@ export function Rubik({ upd }) {
           </div>
         ))}
       </div>
+      <Rubik3D cube={cube} />
       {won && <p className="win">Solved in {fmt(t)} with {moves} moves{assisted.current ? " (assisted — no reward)" : ` — +${LEVELS[lvl].coins} coins`}.</p>}
       <div className="moves">
         {Object.keys(FACES).flatMap((f) => [f, f + "'"]).map((m) => (
@@ -87,7 +146,7 @@ export function Rubik({ upd }) {
 }
 
 /* ============================ ARCADE SHELL ============================ */
-function Arcade({ title, hint, game, onEnd }) {
+function Arcade({ title, hint, game, onEnd, controls = [] }) {
   const ref = useRef(), [run, setRun] = useState(0), [hud, setHud] = useState(""), [over, setOver] = useState(null);
   useEffect(() => {
     setOver(null); setHud("");
@@ -99,6 +158,23 @@ function Arcade({ title, hint, game, onEnd }) {
       <header><h2>{title}</h2><b>{hud}</b></header>
       <div className="stage">
         <canvas ref={ref} onContextMenu={(e) => e.preventDefault()} />
+        {controls.length > 0 && (
+          <div className="touch-controls">
+            {controls.map(({ label, onPress, onRelease }) => (
+              <button
+                key={label}
+                type="button"
+                className="touch-button"
+                onPointerDown={(e) => { e.preventDefault(); onPress?.(); }}
+                onPointerUp={onRelease}
+                onPointerLeave={onRelease}
+                onPointerCancel={onRelease}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
         {over && <div className="over"><h3>{over.text}</h3><button className="primary" onClick={() => setRun(run + 1)}>Play again</button></div>}
       </div>
       <p className="muted">{hint}</p>
@@ -133,8 +209,13 @@ const runnerGame = (x, cv, api) => {
   return () => { cancelAnimationFrame(raf); removeEventListener("keydown", key); cv.removeEventListener("pointerdown", jump); };
 };
 export const Runner = ({ upd }) => (
-  <Arcade title="Infinite runner" hint="Space, ↑ or tap to jump. The road speeds up the longer you survive."
-    game={runnerGame} onEnd={(r) => upd((s) => ({ ...s, runner: Math.max(s.runner, r.score) }))} />
+  <Arcade
+    title="Infinite runner"
+    hint="Space, ↑ or tap to jump. The road speeds up the longer you survive."
+    game={runnerGame}
+    onEnd={(r) => upd((s) => ({ ...s, runner: Math.max(s.runner, r.score) }))}
+    controls={[{ label: "Jump", onPress: () => window.dispatchEvent(new KeyboardEvent("keydown", { code: "Space", bubbles: true })) }]}
+  />
 );
 
 /* ---------- infinite flyer with coins ---------- */
@@ -169,6 +250,13 @@ const flyerGame = (x, cv, api) => {
   return () => { cancelAnimationFrame(raf); removeEventListener("keydown", kd); removeEventListener("keyup", ku); cv.removeEventListener("pointerdown", on); removeEventListener("pointerup", off); };
 };
 export const Flyer = ({ upd }) => (
-  <Arcade title="Coin flyer" hint="Hold Space or press the screen to climb, release to fall. Fly through the gaps and grab the coins."
-    game={flyerGame} onEnd={(r) => upd((s) => ({ ...s, flyer: Math.max(s.flyer, r.score), coins: s.coins + r.coins }))} />
+  <Arcade
+    title="Coin flyer"
+    hint="Hold Space or press the screen to climb, release to fall. Fly through the gaps and grab the coins."
+    game={flyerGame}
+    onEnd={(r) => upd((s) => ({ ...s, flyer: Math.max(s.flyer, r.score), coins: s.coins + r.coins }))}
+    controls={[
+      { label: "Climb", onPress: () => window.dispatchEvent(new KeyboardEvent("keydown", { code: "Space", bubbles: true })), onRelease: () => window.dispatchEvent(new KeyboardEvent("keyup", { code: "Space", bubbles: true })) },
+    ]}
+  />
 );
